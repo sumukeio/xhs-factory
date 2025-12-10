@@ -1,26 +1,41 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* === 1. 爆款工厂专用字体库 === */
+/* 请确保你的字体文件放在 public/fonts/ 目录下 */
+@layer base {
+  @font-face {
+    font-family: 'XHS-Bold';
+    /* 注意：这里路径是 /fonts/ 开头，对应 public 目录 */
+    src: url('/fonts/bold.ttf') format('truetype'); 
+    font-display: swap;
+  }
+  @font-face {
+    font-family: 'XHS-Serif';
+    src: url('/fonts/serif.ttf') format('truetype'); 
+    font-display: swap;
   }
 }
 
+/* === 2. 定义工具类以便在组件中直接使用 === */
+@layer utilities {
+  .font-xhs-bold {
+    font-family: 'XHS-Bold', sans-serif;
+  }
+  
+  .font-xhs-serif {
+    font-family: 'XHS-Serif', serif;
+  }
+  
+  /* 解决中文排版两端对齐的间距问题 */
+  .text-justify-cjk {
+    text-align: justify;
+    text-justify: inter-ideograph;
+  }
+}
+
+/* === 3. 基础重置 (可选) === */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  @apply bg-gray-50 text-gray-900;
 }
