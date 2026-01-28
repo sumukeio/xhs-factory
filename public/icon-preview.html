@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图标预览 - XHS Factory</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 32px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 40px;
+            font-size: 14px;
+        }
+        .section-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+            margin: 40px 0 20px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        .icons-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 25px;
+            margin-bottom: 40px;
+        }
+        .icon-card {
+            text-align: center;
+            padding: 25px;
+            border-radius: 12px;
+            background: #f8f9fa;
+            transition: all 0.3s;
+            cursor: pointer;
+            border: 2px solid transparent;
+        }
+        .icon-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            border-color: #e5e7eb;
+        }
+        .icon-card.selected {
+            background: #eff6ff;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        .icon-preview {
+            width: 100px;
+            height: 100px;
+            margin: 0 auto 20px;
+            background: white;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        .icon-preview img {
+            width: 70px;
+            height: 70px;
+        }
+        .icon-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 6px;
+        }
+        .icon-desc {
+            font-size: 13px;
+            color: #666;
+            line-height: 1.5;
+            margin-bottom: 15px;
+        }
+        .size-demo {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        .size-item {
+            text-align: center;
+        }
+        .size-label {
+            font-size: 11px;
+            color: #999;
+            margin-bottom: 5px;
+        }
+        .size-preview {
+            background: white;
+            border-radius: 6px;
+            padding: 6px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+        }
+        .size-preview img {
+            display: block;
+        }
+        .action-buttons {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 30px;
+            border-top: 2px solid #e5e7eb;
+        }
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin: 0 10px;
+        }
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #2563eb;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+        .btn-secondary {
+            background: #e9ecef;
+            color: #333;
+        }
+        .btn-secondary:hover {
+            background: #dee2e6;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+        .badge-new {
+            background: #10b981;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 XHS Factory 图标选择</h1>
+        <p class="subtitle">请选择您喜欢的图标风格（共8个选项）</p>
+        
+        <div class="section-title">📝 小红书风格（选项1-3）</div>
+        <div class="icons-grid">
+            <div class="icon-card" data-option="1">
+                <div class="icon-preview">
+                    <img src="/icon-option-1.svg" alt="选项1">
+                </div>
+                <div class="icon-title">选项1: 现代简约</div>
+                <div class="icon-desc">
+                    小红书经典红色<br>
+                    笔记图标设计<br>
+                    简洁现代风格
+                </div>
+                <div class="size-demo">
+                    <div class="size-item">
+                        <div class="size-label">64x64</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-1.svg" width="64" height="64" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">32x32</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-1.svg" width="32" height="32" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">16x16</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-1.svg" width="16" height="16" alt="">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="icon-card" data-option="2">
+                <div class="icon-preview">
+                    <img src="/icon-option-2.svg" alt="选项2">
+                </div>
+                <div class="icon-title">选项2: 专业数据</div>
+                <div class="icon-desc">
+                    数据采集网络图标<br>
+                    专业技术风格<br>
+                    渐变色彩设计
+                </div>
+                <div class="size-demo">
+                    <div class="size-item">
+                        <div class="size-label">64x64</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-2.svg" width="64" height="64" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">32x32</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-2.svg" width="32" height="32" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">16x16</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-2.svg" width="16" height="16" alt="">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="icon-card" data-option="3">
+                <div class="icon-preview">
+                    <img src="/icon-option-3.svg" alt="选项3">
+                </div>
+                <div class="icon-title">选项3: 创意工厂</div>
+                <div class="icon-desc">
+                    工厂建筑风格<br>
+                    创意组合设计<br>
+                    温馨粉色主题
+                </div>
+                <div class="size-demo">
+                    <div class="size-item">
+                        <div class="size-label">64x64</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-3.svg" width="64" height="64" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">32x32</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-3.svg" width="32" height="32" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">16x16</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-3.svg" width="16" height="16" alt="">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-title">✨ 硅谷风格 <span class="badge badge-new">NEW</span>（选项4-8）</div>
+        <div class="icons-grid">
+            <div class="icon-card" data-option="4">
+                <div class="icon-preview">
+                    <img src="/icon-option-4.svg" alt="选项4">
+                </div>
+                <div class="icon-title">选项4: 数据流节点</div>
+                <div class="icon-desc">
+                    网络节点连接<br>
+                    科技感设计<br>
+                    紫蓝渐变配色
+                </div>
+                <div class="size-demo">
+                    <div class="size-item">
+                        <div class="size-label">64x64</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-4.svg" width="64" height="64" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">32x32</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-4.svg" width="32" height="32" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">16x16</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-4.svg" width="16" height="16" alt="">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="icon-card" data-option="5">
+                <div class="icon-preview">
+                    <img src="/icon-option-5.svg" alt="选项5">
+                </div>
+                <div class="icon-title">选项5: 几何抽象</div>
+                <div class="icon-desc">
+                    六边形几何形状<br>
+                    青绿渐变配色<br>
+                    现代简约风格
+                </div>
+                <div class="size-demo">
+                    <div class="size-item">
+                        <div class="size-label">64x64</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-5.svg" width="64" height="64" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">32x32</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-5.svg" width="32" height="32" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">16x16</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-5.svg" width="16" height="16" alt="">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="icon-card" data-option="6">
+                <div class="icon-preview">
+                    <img src="/icon-option-6.svg" alt="选项6">
+                </div>
+                <div class="icon-title">选项6: 极简线条</div>
+                <div class="icon-desc">
+                    抽象流动线条<br>
+                    极简主义设计<br>
+                    蓝色专业配色
+                </div>
+                <div class="size-demo">
+                    <div class="size-item">
+                        <div class="size-label">64x64</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-6.svg" width="64" height="64" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">32x32</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-6.svg" width="32" height="32" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">16x16</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-6.svg" width="16" height="16" alt="">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="icon-card" data-option="7">
+                <div class="icon-preview">
+                    <img src="/icon-option-7.svg" alt="选项7">
+                </div>
+                <div class="icon-title">选项7: 渐变现代</div>
+                <div class="icon-desc">
+                    多层渐变设计<br>
+                    紫粉渐变配色<br>
+                    现代科技感
+                </div>
+                <div class="size-demo">
+                    <div class="size-item">
+                        <div class="size-label">64x64</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-7.svg" width="64" height="64" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">32x32</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-7.svg" width="32" height="32" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">16x16</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-7.svg" width="16" height="16" alt="">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="icon-card" data-option="8">
+                <div class="icon-preview">
+                    <img src="/icon-option-8.svg" alt="选项8">
+                </div>
+                <div class="icon-title">选项8: 抽象符号</div>
+                <div class="icon-desc">
+                    集合交集设计<br>
+                    抽象符号风格<br>
+                    紫色系配色
+                </div>
+                <div class="size-demo">
+                    <div class="size-item">
+                        <div class="size-label">64x64</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-8.svg" width="64" height="64" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">32x32</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-8.svg" width="32" height="32" alt="">
+                        </div>
+                    </div>
+                    <div class="size-item">
+                        <div class="size-label">16x16</div>
+                        <div class="size-preview">
+                            <img src="/icon-option-8.svg" width="16" height="16" alt="">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="action-buttons">
+            <button class="btn btn-primary" onclick="selectIcon()">确认选择</button>
+            <button class="btn btn-secondary" onclick="window.location.reload()">重新查看</button>
+        </div>
+    </div>
+    
+    <script>
+        let selectedOption = null;
+        
+        document.querySelectorAll('.icon-card').forEach(card => {
+            card.addEventListener('click', function() {
+                // 移除所有选中状态
+                document.querySelectorAll('.icon-card').forEach(c => c.classList.remove('selected'));
+                // 添加选中状态
+                this.classList.add('selected');
+                selectedOption = this.dataset.option;
+            });
+        });
+        
+        function selectIcon() {
+            if (!selectedOption) {
+                alert('请先选择一个图标！');
+                return;
+            }
+            const iconName = selectedOption <= 3 ? '小红书风格' : '硅谷风格';
+            alert(`您选择了选项 ${selectedOption}（${iconName}）\n\n图标文件：/icon-option-${selectedOption}.svg\n\n请告诉我您的选择，我会帮您更新到项目中。`);
+        }
+    </script>
+</body>
+</html>

@@ -1,10 +1,12 @@
 "use client"; // 必须标记为客户端组件，因为用到了 useState
 
 import { useState } from 'react';
+import Link from 'next/link';
 // 注意这里的路径别名 @/ 指向 src/
 import EditorPanel from '@/components/EditorPanel';
 import CanvasPreview from '@/components/CanvasPreview';
 import { PostData } from '@/types';
+import { Link as LinkIcon } from 'lucide-react';
 
 export default function Home() {
   // === 初始化默认爆款数据 ===
@@ -25,7 +27,22 @@ export default function Home() {
   });
 
   return (
-    <main className="flex w-full h-screen overflow-hidden bg-gray-50">
+    <main className="flex flex-col w-full h-screen overflow-hidden bg-gray-50">
+      {/* 顶部导航 */}
+      <div className="flex-shrink-0 bg-white border-b shadow-sm px-6 py-3">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold text-gray-900">XHS Factory</h1>
+          <Link
+            href="/crawler"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <LinkIcon className="w-4 h-4" />
+            笔记爬取工具
+          </Link>
+        </div>
+      </div>
+      
+      <div className="flex flex-1 overflow-hidden">
       {/* === 左侧：控制台 (固定宽度) === */}
       <div className="w-[400px] flex-shrink-0 border-r border-gray-200 bg-white h-full overflow-y-auto">
         <EditorPanel data={postData} onChange={setPostData} />
@@ -37,6 +54,7 @@ export default function Home() {
         <div className="absolute inset-0 opacity-[0.03] bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
         
         <CanvasPreview data={postData} />
+      </div>
       </div>
     </main>
   );

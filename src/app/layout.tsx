@@ -5,6 +5,11 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "XHS Factory",
   description: "小红书爆款工厂控制台",
+  icons: {
+    icon: "/icon-option-1.svg",
+    shortcut: "/icon-option-1.svg",
+    apple: "/icon-option-1.svg",
+  },
 };
 
 export default function RootLayout({
