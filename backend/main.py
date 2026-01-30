@@ -35,12 +35,11 @@ DOWNLOAD_ROOT = os.path.join(BASE_DIR, "downloads")
 os.makedirs(DOWNLOAD_ROOT, exist_ok=True)
 
 if not GOOGLE_API_KEY:
-    print("⚠️ 警告: 未检测到 GEMINI_API_KEY，AI 功能将无法使用。")
+    print("ℹ️  提示: 未检测到 GEMINI_API_KEY，AI 生成功能将不可用（爬取功能不受影响）。")
 
 app = FastAPI()
 
 # 添加CORS支持
-from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # 生产环境应该限制具体域名
@@ -133,6 +132,14 @@ class BrowseFolderResponse(BaseModel):
     current_path: str
     items: List[FolderItem]
     parent_path: Optional[str] = None
+
+
+# === 新增：ZIP下载相关模型 ===
+class ZipDownloadRequest(BaseModel):
+    """ZIP下载请求"""
+    note_data: Dict  # 笔记数据（包含 title, content, tags, images 等）
+    selected_image_indices: List[int] | None = None  # 选中的图片索引（None表示全部）
+
 
 async def download_image_as_bytes(url: str):
     """
