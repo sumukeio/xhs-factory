@@ -48,15 +48,19 @@ export default function FolderPicker({
         body: JSON.stringify({ path }),
       });
 
-      const data: BrowseResponse = await res.json();
+      const data: any = await res.json();
 
       if (!res.ok) {
-        throw new Error(data as any);
+        throw new Error(
+          data?.detail ||
+            data?.message ||
+            (typeof data === "string" ? data : JSON.stringify(data))
+        );
       }
 
       setCurrentDir(data.current_path);
-      setItems(data.items);
-      setParentPath(data.parent_path);
+      setItems(data.items || []);
+      setParentPath(data.parent_path ?? null);
       // 如果设置了setAsSelected，或者当前没有选中路径，则选中当前文件夹
       if (setAsSelected || !selectedPath) {
         setSelectedPath(data.current_path);

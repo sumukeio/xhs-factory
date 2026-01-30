@@ -4,7 +4,9 @@ import httpx
 import uvicorn
 import hashlib
 import asyncio
-from fastapi import FastAPI, HTTPException
+import zipfile
+import io
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Optional
@@ -434,11 +436,86 @@ async def batch_parse(request: BatchParseRequest):
     return BatchParseResponse(notes=notes, failed=failed)
 
 
-# === 新增：选择性下载接口 ===
+# === 新增：ZIP下载接口（推荐，直接下载到用户本地） ===
+@app.post("/api/download_zip")
+async def download_zip(request: ZipDownloadRequest):
+    """
+    将笔记打包成ZIP并返回给前端下载
+    """
+    print(f"\n📦 [ZIP下载] 开始打包: {request.note_data.get('title', '')}")
+    
+    try:
+        title = request.note_data.get('title', 'xhs_note')
+        content = request.note_data.get('content', '')
+        tags = request.note_data.get('tags', [])
+        origin_url = request.note_data.get('origin_url', '')
+        images = request.note_data.get('images', [])
+        
+        # 确定要下载的图片
+        images_to_download = images
+        if request.selected_image_indices is not None:
+            images_to_download = [images[i] for i in request.selected_image_indices if 0 <= i < len(images)]
+        
+        # 创建内存中的ZIP文件
+        zip_buffer = io.BytesIO()
+        folder_name = _sanitize_filename(title)
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            # 1. 添加文本文件
+            text_filename = f"{folder_name}.txt"
+            text_content = f"{title}\n\n{content}\n\n"
+            if tags:
+                text_content += f"标签: {', '.join(tags)}\n"
+            if origin_url:
+                text_content += f"来源链接: {origin_url}\n"
+            
+            zip_file.writestr(text_filename, text_content.encode('utf-8'))
+            
+            # 2. 下载并添加图片
+            for idx, img_url in enumerate(images_to_download, start=1):
+                img_data = await download_image_as_bytes(img_url)
+                if not img_data:
+                    continue
+                
+                mime = img_data.get("mime_type", "image/jpeg").lower()
+                ext = "jpg"
+                if "png" in mime:
+                    ext = "png"
+                elif "webp" in mime:
+                    ext = "webp"
+                elif "gif" in mime:
+                    ext = "gif"
+                
+                img_filename = f"image_{idx}.{ext}"
+                zip_file.writestr(img_filename, img_data["data"])
+                print(f"   - 已添加图片: {img_filename}")
+        
+        zip_buffer.seek(0)
+        zip_filename = f"{folder_name}.zip"
+        
+        print(f"✅ [ZIP下载] 打包完成: {zip_filename} ({len(zip_buffer.getvalue())} bytes)")
+        
+        # 返回ZIP文件
+        return Response(
+            content=zip_buffer.getvalue(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{zip_filename}"',
+                "Content-Length": str(len(zip_buffer.getvalue()))
+            }
+        )
+        
+    except Exception as e:
+        print(f"❌ [ZIP下载] 失败: {e}")
+        raise HTTPException(status_code=500, detail=f"打包ZIP失败: {str(e)}")
+
+
+# === 旧版：选择性下载接口（保存到服务器，保留用于兼容） ===
 @app.post("/api/selective_download", response_model=SelectiveDownloadResponse)
 async def selective_download(request: SelectiveDownloadRequest):
     """
-    选择性下载笔记（支持选择特定图片）
+    选择性下载笔记（支持选择特定图片）- 保存到服务器
+    注意：Fly.io 文件系统是临时的，建议使用 /api/download_zip 接口
     """
     print(f"\n📥 [选择性下载] 开始下载: {request.note_data.get('title', '')}")
     
@@ -517,4 +594,5 @@ async def browse_folder(request: BrowseFolderRequest):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run(app, host="0.0.0.0", port=port)

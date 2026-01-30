@@ -12,11 +12,9 @@ import {
   RotateCcw,
   X,
   MoreVertical,
-  FolderOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import NotePreviewModal from "@/components/NotePreviewModal";
-import FolderPicker from "@/components/FolderPicker";
 
 const STORAGE_KEY_NOTES = "xhs_crawler_notes";
 const STORAGE_KEY_TRASH = "xhs_crawler_trash";
@@ -33,10 +31,7 @@ export default function CrawlerPage() {
   const [previewNote, setPreviewNote] = useState<Note | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [showMore, setShowMore] = useState(false);
-  const [baseDir, setBaseDir] = useState("backend/downloads");
-  const [useDefaultDir, setUseDefaultDir] = useState(false);
   const [activeTab, setActiveTab] = useState<"main" | "trash">("main");
-  const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastValueRef = useRef<string>("");
 
@@ -44,7 +39,6 @@ export default function CrawlerPage() {
   useEffect(() => {
     const savedNotes = localStorage.getItem(STORAGE_KEY_NOTES);
     const savedTrash = localStorage.getItem(STORAGE_KEY_TRASH);
-    const savedDefaultDir = localStorage.getItem(STORAGE_KEY_DEFAULT_DIR);
     
     if (savedNotes) {
       try {
@@ -60,10 +54,6 @@ export default function CrawlerPage() {
         console.error("加载回收站失败:", e);
       }
     }
-    if (savedDefaultDir) {
-      setBaseDir(savedDefaultDir);
-      setUseDefaultDir(true);
-    }
   }, []);
 
   // 保存到localStorage
@@ -76,35 +66,6 @@ export default function CrawlerPage() {
     setTrash(newTrash);
     localStorage.setItem(STORAGE_KEY_TRASH, JSON.stringify(newTrash));
   }, []);
-
-  // 处理文件夹选择
-  const handleSelectFolder = () => {
-    setIsFolderPickerOpen(true);
-  };
-
-  // 文件夹选择回调
-  const handleFolderSelected = (path: string) => {
-    setBaseDir(path);
-  };
-
-  // 处理"设为默认"复选框变化
-  const handleUseDefaultDirChange = (checked: boolean) => {
-    setUseDefaultDir(checked);
-    if (checked) {
-      // 保存为默认文件夹
-      localStorage.setItem(STORAGE_KEY_DEFAULT_DIR, baseDir);
-    } else {
-      // 清除默认文件夹
-      localStorage.removeItem(STORAGE_KEY_DEFAULT_DIR);
-    }
-  };
-
-  // 当baseDir变化时，如果已勾选"设为默认"，则更新localStorage
-  useEffect(() => {
-    if (useDefaultDir && baseDir) {
-      localStorage.setItem(STORAGE_KEY_DEFAULT_DIR, baseDir);
-    }
-  }, [baseDir, useDefaultDir]);
 
   // 提取链接（从粘贴内容中自动提取）
   const extractUrls = (text: string): string[] => {
@@ -285,7 +246,7 @@ export default function CrawlerPage() {
     }
   };
 
-  // 下载笔记（选择性下载）
+  // 下载笔记（ZIP下载到本地）
   const handleDownload = async (
     note: Note,
     selectedImageIndices: number[]
@@ -294,7 +255,7 @@ export default function CrawlerPage() {
       const BACKEND_BASE =
         process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000";
 
-      const res = await fetch(`${BACKEND_BASE}/api/selective_download`, {
+      const res = await fetch(`${BACKEND_BASE}/api/download_zip`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -309,17 +270,37 @@ export default function CrawlerPage() {
             selectedImageIndices.length === note.images.length
               ? null
               : selectedImageIndices,
-          base_dir: baseDir || undefined,
         }),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        throw new Error(data?.detail || data?.message || "下载失败");
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData?.detail || errorData?.message || "下载失败");
       }
 
-      alert(`✅ 下载成功！已保存到：${data.folder}`);
+      // 获取ZIP文件并触发下载
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      
+      // 从响应头获取文件名，如果没有则使用笔记标题
+      const contentDisposition = res.headers.get("Content-Disposition");
+      let filename = `${note.title || "xhs_note"}.zip`;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?(.+?)"?$/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      // 清理文件名（移除Windows不允许的特殊字符）
+      const sanitizedFilename = filename.replace(/[<>:"/\\|?*]/g, "_");
+      a.download = sanitizedFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
     } catch (err: any) {
       console.error(err);
       alert("下载失败：" + err.message);
@@ -337,12 +318,19 @@ export default function CrawlerPage() {
     let successCount = 0;
     let failCount = 0;
 
-    for (const note of selectedNotes) {
+    // 批量下载时，每个文件之间添加小延迟，避免浏览器阻止多个下载
+    for (let i = 0; i < selectedNotes.length; i++) {
+      const note = selectedNotes[i];
       try {
         await handleDownload(note, note.images.map((_, i) => i)); // 下载全部图片
         successCount++;
+        // 如果不是最后一个，等待一小段时间再下载下一个
+        if (i < selectedNotes.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500)); // 延迟500ms
+        }
       } catch (e) {
         failCount++;
+        console.error(`下载笔记失败: ${note.title}`, e);
       }
     }
 
@@ -528,37 +516,8 @@ export default function CrawlerPage() {
                       </>
                     )}
                   </button>
-                  <div className="flex-1 space-y-2">
-                    <label className="text-xs text-gray-500 block">
-                      保存根目录：
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={baseDir}
-                        onChange={(e) => setBaseDir(e.target.value)}
-                        className="flex-1 px-3 py-1.5 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="例如：D:\XHSNotes 或 backend/downloads"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleSelectFolder}
-                        className="px-4 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors inline-flex items-center gap-2 whitespace-nowrap"
-                        title="选择文件夹（需要浏览器支持）"
-                      >
-                        <FolderOpen className="w-4 h-4" />
-                        选择文件夹
-                      </button>
-                    </div>
-                    <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={useDefaultDir}
-                        onChange={(e) => handleUseDefaultDirChange(e.target.checked)}
-                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                      />
-                      <span>设为默认文件夹（后续下载将自动使用此路径）</span>
-                    </label>
+                  <div className="text-xs text-gray-500 bg-blue-50 px-3 py-2 rounded-lg border border-blue-100">
+                    💡 提示：下载的笔记会自动打包成 ZIP 文件，直接保存到您的本地下载文件夹
                   </div>
                 </div>
               </div>
@@ -840,13 +799,6 @@ export default function CrawlerPage() {
         onDownload={handleDownload}
       />
 
-      {/* 文件夹选择对话框 */}
-      <FolderPicker
-        isOpen={isFolderPickerOpen}
-        onClose={() => setIsFolderPickerOpen(false)}
-        onSelect={handleFolderSelected}
-        currentPath={baseDir}
-      />
     </div>
   );
 }

@@ -1,0 +1,31 @@
+# fly.toml app configuration file generated for xhs-factory-backend on 2026-01-30T09:01:07+08:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'xhs-factory-backend'
+primary_region = 'sin'
+
+[build]
+  dockerfile = 'backend/Dockerfile'
+
+[env]
+  PORT = '8080'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+  [http_service.concurrency]
+    type = 'requests'
+    hard_limit = 5
+    soft_limit = 3
+
+[[vm]]
+  memory = '1gb'
+  cpus = 1
+  memory_mb = 1024
