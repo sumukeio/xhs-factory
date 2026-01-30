@@ -142,26 +142,45 @@ class ZipDownloadRequest(BaseModel):
     selected_image_indices: List[int] | None = None  # 选中的图片索引（None表示全部）
 
 
-async def download_image_as_bytes(url: str):
+async def download_image_as_bytes(url: str, convert_to_png: bool = True):
     """
-    下载图片 (图片通常不需要走代理，或者走代理也行)
-    这里为了稳妥，我们让图片下载也尝试走一下代理，或者直连
+    下载图片并可选转换为PNG格式（公众号兼容性更好）
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://www.xiaohongshu.com/"
     }
     
-    # 图片通常国内能访问，所以这里 proxy=None (不走代理)，速度更快
-    # 如果下载失败，可以改成 proxy=LOCAL_VPN_PROXY
     async with httpx.AsyncClient(headers=headers, follow_redirects=True, verify=False) as client:
         try:
             resp = await client.get(url, timeout=15.0)
             if resp.status_code == 200:
+                img_data = resp.content
+                mime_type = resp.headers.get("content-type", "image/jpeg").lower()
+                
+                # 如果是webp且需要转换为PNG，则转换
+                if convert_to_png and "webp" in mime_type:
+                    try:
+                        img = Image.open(io.BytesIO(img_data))
+                        # 如果是RGBA模式，保持透明度；否则转换为RGB
+                        if img.mode == 'RGBA':
+                            img = img.convert('RGBA')
+                        else:
+                            img = img.convert('RGB')
+                        
+                        # 转换为PNG格式
+                        png_buffer = io.BytesIO()
+                        img.save(png_buffer, format='PNG', quality=95, optimize=True)
+                        img_data = png_buffer.getvalue()
+                        mime_type = "image/png"
+                        print(f"   - 图片转换成功 (webp -> png): {url[:30]}...")
+                    except Exception as e:
+                        print(f"   - 图片转换失败，使用原格式: {e}")
+                
                 print(f"   - 图片下载成功: {url[:30]}...")
                 return {
-                    "mime_type": resp.headers.get("content-type", "image/jpeg"),
-                    "data": resp.content
+                    "mime_type": mime_type,
+                    "data": img_data
                 }
             else:
                 print(f"   - 图片下载失败 (状态码 {resp.status_code}): {url[:30]}...")
@@ -451,7 +470,7 @@ async def proxy_image(url: str):
     代理图片请求，解决前端CORS问题
     """
     try:
-        img_data = await download_image_as_bytes(url)
+        img_data = await download_image_as_bytes(url, convert_to_png=False)  # 代理图片不需要转换
         if not img_data:
             raise HTTPException(status_code=404, detail="图片下载失败")
         
@@ -502,18 +521,18 @@ async def download_zip(request: ZipDownloadRequest):
             
             zip_file.writestr(text_filename, text_content.encode('utf-8'))
             
-            # 2. 下载并添加图片
+            # 2. 下载并添加图片（转换为PNG格式，公众号兼容性更好）
             for idx, img_url in enumerate(images_to_download, start=1):
-                img_data = await download_image_as_bytes(img_url)
+                img_data = await download_image_as_bytes(img_url, convert_to_png=True)
                 if not img_data:
                     continue
                 
                 mime = img_data.get("mime_type", "image/jpeg").lower()
-                ext = "jpg"
+                ext = "png"  # 默认使用PNG格式（公众号兼容性更好）
                 if "png" in mime:
                     ext = "png"
-                elif "webp" in mime:
-                    ext = "webp"
+                elif "jpg" in mime or "jpeg" in mime:
+                    ext = "jpg"
                 elif "gif" in mime:
                     ext = "gif"
                 
@@ -528,8 +547,25 @@ async def download_zip(request: ZipDownloadRequest):
         
         # 使用RFC 5987格式编码文件名，支持中文
         # 格式: attachment; filename="fallback.zip"; filename*=UTF-8''encoded.zip
+        # 注意：filename 参数必须只包含 ASCII 字符，否则 FastAPI 会尝试用 latin-1 编码导致错误
+        # 生成 ASCII 安全的 fallback 文件名（只保留 ASCII 字符，非 ASCII 字符替换为下划线）
+        ascii_safe_filename = "".join(c if ord(c) < 128 and c.isprintable() else "_" for c in zip_filename)
+        if not ascii_safe_filename or ascii_safe_filename == ".zip" or ascii_safe_filename.strip() == "":
+            ascii_safe_filename = "xhs_note.zip"
+        
+        # 编码 UTF-8 文件名（用于 filename* 参数）
         encoded_filename = quote(zip_filename.encode('utf-8'))
-        content_disposition = f'attachment; filename="{zip_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+        
+        # 构建 Content-Disposition 头（filename 使用 ASCII 安全名称，filename* 使用 UTF-8 编码）
+        # 确保整个字符串都是 ASCII 安全的
+        content_disposition = f'attachment; filename="{ascii_safe_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+        
+        # 验证 content_disposition 字符串是否只包含 ASCII 字符
+        try:
+            content_disposition.encode('ascii')
+        except UnicodeEncodeError:
+            # 如果包含非 ASCII 字符，只使用 filename* 参数
+            content_disposition = f'attachment; filename*=UTF-8\'\'{encoded_filename}'
         
         # 返回ZIP文件
         return Response(

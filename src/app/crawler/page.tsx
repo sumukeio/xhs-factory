@@ -24,6 +24,7 @@ const DISPLAY_LIMIT = 20; // 预览区默认最多显示20个
 export default function CrawlerPage() {
   const [urlInput, setUrlInput] = useState("");
   const [isParsing, setIsParsing] = useState(false);
+  const [parseProgress, setParseProgress] = useState({ current: 0, total: 0 });
   const [notes, setNotes] = useState<Note[]>([]);
   const [trash, setTrash] = useState<Note[]>([]);
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
@@ -32,6 +33,7 @@ export default function CrawlerPage() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [activeTab, setActiveTab] = useState<"main" | "trash">("main");
+  const [downloadProgress, setDownloadProgress] = useState<{ current: number; total: number; noteTitle?: string } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastValueRef = useRef<string>("");
 
@@ -203,6 +205,7 @@ export default function CrawlerPage() {
     }
 
     setIsParsing(true);
+    setParseProgress({ current: 0, total: urls.length });
     try {
       const res = await fetch("/api/batch-parse", {
         method: "POST",
@@ -215,6 +218,8 @@ export default function CrawlerPage() {
       if (!res.ok) {
         throw new Error(data?.message || "解析失败");
       }
+      
+      setParseProgress({ current: urls.length, total: urls.length });
 
       // 转换数据格式并添加时间戳
       const newNotes: Note[] = data.notes.map((n: any) => ({
@@ -251,6 +256,9 @@ export default function CrawlerPage() {
     note: Note,
     selectedImageIndices: number[]
   ) => {
+    const totalImages = selectedImageIndices.length || note.images.length;
+    setDownloadProgress({ current: 0, total: totalImages, noteTitle: note.title });
+    
     try {
       const BACKEND_BASE =
         process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000";
@@ -272,6 +280,9 @@ export default function CrawlerPage() {
               : selectedImageIndices,
         }),
       });
+      
+      // 模拟进度更新（实际进度由后端控制）
+      setDownloadProgress({ current: totalImages, total: totalImages, noteTitle: note.title });
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
@@ -301,9 +312,11 @@ export default function CrawlerPage() {
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
+      setDownloadProgress(null);
     } catch (err: any) {
       console.error(err);
       alert("下载失败：" + err.message);
+      setDownloadProgress(null);
     }
   };
 
@@ -498,27 +511,45 @@ export default function CrawlerPage() {
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono text-sm"
                   />
                 </div>
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={handleParse}
-                    disabled={isParsing}
-                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {isParsing ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        解析中...
-                      </>
-                    ) : (
-                      <>
-                        <LinkIcon className="w-4 h-4" />
-                        开始解析
-                      </>
-                    )}
-                  </button>
-                  <div className="text-xs text-gray-500 bg-blue-50 px-3 py-2 rounded-lg border border-blue-100">
-                    💡 提示：下载的笔记会自动打包成 ZIP 文件，直接保存到您的本地下载文件夹
+                <div className="space-y-3">
+                  <div className="flex items-center gap-4">
+                    <button
+                      onClick={handleParse}
+                      disabled={isParsing}
+                      className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {isParsing ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          解析中...
+                        </>
+                      ) : (
+                        <>
+                          <LinkIcon className="w-4 h-4" />
+                          开始解析
+                        </>
+                      )}
+                    </button>
+                    <div className="text-xs text-gray-500 bg-blue-50 px-3 py-2 rounded-lg border border-blue-100">
+                      💡 提示：下载的笔记会自动打包成 ZIP 文件，直接保存到您的本地下载文件夹
+                    </div>
                   </div>
+                  {isParsing && parseProgress.total > 0 && (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-sm text-gray-600">
+                        <span>正在解析...</span>
+                        <span>{parseProgress.current}/{parseProgress.total}</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                        <div
+                          className="bg-blue-600 h-full transition-all duration-300 ease-out"
+                          style={{
+                            width: `${(parseProgress.current / parseProgress.total) * 100}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </section>
@@ -812,6 +843,28 @@ export default function CrawlerPage() {
         }}
         onDownload={handleDownload}
       />
+
+      {/* 下载进度条 */}
+      {downloadProgress && (
+        <div className="fixed bottom-6 right-6 bg-white rounded-lg shadow-lg border border-gray-200 p-4 min-w-[300px] z-50">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-gray-900">
+              正在下载: {downloadProgress.noteTitle?.slice(0, 20)}...
+            </span>
+            <span className="text-sm text-gray-600">
+              {downloadProgress.current}/{downloadProgress.total}
+            </span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+            <div
+              className="bg-green-600 h-full transition-all duration-300 ease-out"
+              style={{
+                width: `${(downloadProgress.current / downloadProgress.total) * 100}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
 
     </div>
   );
