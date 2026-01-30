@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Note } from "@/types";
 import { X, ChevronLeft, ChevronRight, Download, Check } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, getProxyImageUrl } from "@/lib/utils";
 
 interface NotePreviewModalProps {
   note: Note | null;
@@ -94,9 +94,16 @@ export default function NotePreviewModal({
                 {/* 图片 */}
                 <div className="relative w-full h-full flex items-center justify-center">
                   <img
-                    src={note.images[currentImageIndex]}
+                    src={getProxyImageUrl(note.images[currentImageIndex])}
                     alt={`${note.title} - 图片 ${currentImageIndex + 1}`}
                     className="max-w-full max-h-full object-contain"
+                    onError={(e) => {
+                      // 如果代理失败，尝试直接使用原URL
+                      const target = e.target as HTMLImageElement;
+                      if (target.src !== note.images[currentImageIndex]) {
+                        target.src = note.images[currentImageIndex];
+                      }
+                    }}
                   />
 
                   {/* 左右箭头（桌面端） */}
@@ -153,9 +160,16 @@ export default function NotePreviewModal({
                         )}
                       >
                         <img
-                          src={img}
+                          src={getProxyImageUrl(img)}
                           alt={`缩略图 ${idx + 1}`}
                           className="w-full h-full object-cover"
+                          onError={(e) => {
+                            // 如果代理失败，尝试直接使用原URL
+                            const target = e.target as HTMLImageElement;
+                            if (target.src !== img) {
+                              target.src = img;
+                            }
+                          }}
                         />
                         {/* 选中标记 */}
                         <div

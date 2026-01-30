@@ -6,6 +6,7 @@ import hashlib
 import asyncio
 import zipfile
 import io
+from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -443,6 +444,29 @@ async def batch_parse(request: BatchParseRequest):
     return BatchParseResponse(notes=notes, failed=failed)
 
 
+# === 新增：图片代理接口（解决CORS问题） ===
+@app.get("/api/proxy_image")
+async def proxy_image(url: str):
+    """
+    代理图片请求，解决前端CORS问题
+    """
+    try:
+        img_data = await download_image_as_bytes(url)
+        if not img_data:
+            raise HTTPException(status_code=404, detail="图片下载失败")
+        
+        return Response(
+            content=img_data["data"],
+            media_type=img_data.get("mime_type", "image/jpeg"),
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Origin": "*"
+            }
+        )
+    except Exception as e:
+        print(f"❌ [图片代理] 失败: {e}")
+        raise HTTPException(status_code=500, detail=f"图片代理失败: {str(e)}")
+
 # === 新增：ZIP下载接口（推荐，直接下载到用户本地） ===
 @app.post("/api/download_zip")
 async def download_zip(request: ZipDownloadRequest):
@@ -502,12 +526,17 @@ async def download_zip(request: ZipDownloadRequest):
         
         print(f"✅ [ZIP下载] 打包完成: {zip_filename} ({len(zip_buffer.getvalue())} bytes)")
         
+        # 使用RFC 5987格式编码文件名，支持中文
+        # 格式: attachment; filename="fallback.zip"; filename*=UTF-8''encoded.zip
+        encoded_filename = quote(zip_filename.encode('utf-8'))
+        content_disposition = f'attachment; filename="{zip_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+        
         # 返回ZIP文件
         return Response(
             content=zip_buffer.getvalue(),
             media_type="application/zip",
             headers={
-                "Content-Disposition": f'attachment; filename="{zip_filename}"',
+                "Content-Disposition": content_disposition,
                 "Content-Length": str(len(zip_buffer.getvalue()))
             }
         )

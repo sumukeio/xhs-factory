@@ -13,7 +13,7 @@ import {
   X,
   MoreVertical,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, getProxyImageUrl } from "@/lib/utils";
 import NotePreviewModal from "@/components/NotePreviewModal";
 
 const STORAGE_KEY_NOTES = "xhs_crawler_notes";
@@ -617,9 +617,16 @@ export default function CrawlerPage() {
                         <div className="aspect-square bg-gray-100 relative overflow-hidden">
                           {note.coverImage ? (
                             <img
-                              src={note.coverImage}
+                              src={getProxyImageUrl(note.coverImage)}
                               alt={note.title}
                               className="w-full h-full object-cover"
+                              onError={(e) => {
+                                // 如果代理失败，尝试直接使用原URL
+                                const target = e.target as HTMLImageElement;
+                                if (target.src !== note.coverImage) {
+                                  target.src = note.coverImage || "";
+                                }
+                              }}
                             />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-gray-400">
@@ -754,9 +761,16 @@ export default function CrawlerPage() {
                     <div className="aspect-square bg-gray-100 relative overflow-hidden">
                       {note.coverImage ? (
                         <img
-                          src={note.coverImage}
+                          src={getProxyImageUrl(note.coverImage)}
                           alt={note.title}
                           className="w-full h-full object-cover opacity-60"
+                          onError={(e) => {
+                            // 如果代理失败，尝试直接使用原URL
+                            const target = e.target as HTMLImageElement;
+                            if (target.src !== note.coverImage) {
+                              target.src = note.coverImage || "";
+                            }
+                          }}
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-gray-400">
