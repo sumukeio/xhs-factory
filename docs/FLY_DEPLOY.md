@@ -65,6 +65,7 @@ curl -X POST "https://xxxx.fly.dev/api/browse_folder" -H "Content-Type: applicat
 ## 7）注意事项
 
 - **Playwright 很吃资源**：免费额度下建议不要同时解析太多链接（我们后端并发也做了限制）。
+- **解析并发数可调**：可通过环境变量 `BATCH_PARSE_CONCURRENCY` 控制批量解析并发数（默认 5，范围 1～10）。限流严时可调小，例如在 Fly.io 的 Secrets 中设置：`fly secrets set BATCH_PARSE_CONCURRENCY=3`
 - **ZIP下载功能**：✅ 已实现 - 所有下载都会自动打包成ZIP文件，直接下载到用户本地，不占用服务器存储
   - 单个笔记：点击预览弹窗的"下载"按钮，自动生成ZIP
   - 批量下载：一键下载多个笔记，每个笔记一个ZIP文件

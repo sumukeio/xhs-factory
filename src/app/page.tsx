@@ -27,34 +27,33 @@ export default function Home() {
   });
 
   return (
-    <main className="flex flex-col w-full h-screen overflow-hidden bg-gray-50">
+    <main className="flex flex-col w-full min-h-screen sm:h-screen overflow-hidden bg-gray-50">
       {/* 顶部导航 */}
-      <div className="flex-shrink-0 bg-white border-b shadow-sm px-6 py-3">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold text-gray-900">XHS Factory</h1>
+      <div className="flex-shrink-0 bg-white border-b shadow-sm px-4 py-3 sm:px-6 sm:py-3">
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="text-lg sm:text-xl font-bold text-gray-900 truncate">XHS Factory</h1>
           <Link
             href="/crawler"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 min-h-[44px] sm:min-h-0 items-center justify-center bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors touch-manipulation shrink-0"
           >
             <LinkIcon className="w-4 h-4" />
-            笔记爬取工具
+            <span className="whitespace-nowrap">笔记爬取工具</span>
           </Link>
         </div>
       </div>
-      
-      <div className="flex flex-1 overflow-hidden">
-      {/* === 左侧：控制台 (固定宽度) === */}
-      <div className="w-[400px] flex-shrink-0 border-r border-gray-200 bg-white h-full overflow-y-auto">
-        <EditorPanel data={postData} onChange={setPostData} />
-      </div>
 
-      {/* === 右侧：实时预览区 (自适应宽度) === */}
-      <div className="flex-1 h-full flex items-center justify-center bg-gray-100 relative">
-        {/* 背景网格装饰 (可选) */}
-        <div className="absolute inset-0 opacity-[0.03] bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
-        
-        <CanvasPreview data={postData} />
-      </div>
+      {/* 小屏：上下布局；大屏：左右布局 */}
+      <div className="flex flex-col md:flex-row flex-1 overflow-hidden min-h-0">
+        {/* 左侧/上方：控制台 */}
+        <div className="w-full md:w-[400px] md:flex-shrink-0 border-b md:border-b-0 md:border-r border-gray-200 bg-white md:h-full overflow-y-auto max-h-[50vh] md:max-h-none">
+          <EditorPanel data={postData} onChange={setPostData} />
+        </div>
+
+        {/* 右侧/下方：实时预览区 */}
+        <div className="flex-1 min-h-[50vh] md:min-h-0 md:h-full flex items-center justify-center bg-gray-100 relative p-4">
+          <div className="absolute inset-0 opacity-[0.03] bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]" />
+          <CanvasPreview data={postData} />
+        </div>
       </div>
     </main>
   );

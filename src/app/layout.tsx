@@ -1,6 +1,6 @@
 // 1. 必须首先引入全局样式，否则 Tailwind 不生效
 import "./globals.css";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 
 export const metadata: Metadata = {
   title: "XHS Factory",
@@ -10,6 +10,14 @@ export const metadata: Metadata = {
     shortcut: "/icon-option-1.svg",
     apple: "/icon-option-1.svg",
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  userScalable: true,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

@@ -39,3 +39,9 @@ export interface DownloadRequest {
   selectedImages?: Record<string, number[]>; // 每个笔记选中的图片索引（可选，不传则下载全部）
   baseDir?: string; // 保存根目录（可选）
 }
+
+/** 待办库单项：链接 + 是否已解析 */
+export interface TodoItem {
+  url: string;
+  parsed: boolean;
+}

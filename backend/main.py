@@ -1,5 +1,6 @@
 import os
 import base64
+import json
 import httpx
 import uvicorn
 import hashlib
@@ -8,6 +9,7 @@ import zipfile
 import io
 from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Optional
@@ -34,6 +36,9 @@ LOCAL_VPN_PROXY = None
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_ROOT = os.path.join(BASE_DIR, "downloads")
 os.makedirs(DOWNLOAD_ROOT, exist_ok=True)
+
+# 批量解析并发数（环境变量 BATCH_PARSE_CONCURRENCY，默认 5，限流严时可调小）
+BATCH_PARSE_CONCURRENCY = max(1, min(10, int(os.getenv("BATCH_PARSE_CONCURRENCY", "5"))))
 
 if not GOOGLE_API_KEY:
     print("ℹ️  提示: 未检测到 GEMINI_API_KEY，AI 生成功能将不可用（爬取功能不受影响）。")
@@ -140,6 +145,7 @@ class ZipDownloadRequest(BaseModel):
     """ZIP下载请求"""
     note_data: Dict  # 笔记数据（包含 title, content, tags, images 等）
     selected_image_indices: List[int] | None = None  # 选中的图片索引（None表示全部）
+    include_text: bool = True  # 是否在ZIP中包含文本文件
 
 
 async def download_image_as_bytes(url: str, convert_to_png: bool = True):
@@ -425,8 +431,8 @@ async def batch_parse(request: BatchParseRequest):
     notes: List[ParsedNote] = []
     failed: List[Dict[str, str]] = []
     
-    # 并发解析（限制并发数避免过载）
-    semaphore = asyncio.Semaphore(3)  # 最多3个并发
+    # 并发解析（限制并发数避免过载，由环境变量 BATCH_PARSE_CONCURRENCY 控制）
+    semaphore = asyncio.Semaphore(BATCH_PARSE_CONCURRENCY)
     
     async def parse_single(url: str):
         async with semaphore:
@@ -461,6 +467,68 @@ async def batch_parse(request: BatchParseRequest):
     
     print(f"✅ [批量解析] 完成: 成功 {len(notes)} 个，失败 {len(failed)} 个")
     return BatchParseResponse(notes=notes, failed=failed)
+
+
+# === 流式批量解析（SSE，实时进度） ===
+@app.post("/api/batch_parse_stream")
+async def batch_parse_stream(request: BatchParseRequest):
+    """
+    批量解析小红书链接，通过 SSE 流式返回进度。
+    事件类型：progress（每解析完一条） -> done（全部完成，带 notes/failed）。
+    """
+    urls = request.urls
+    if not urls:
+        raise HTTPException(status_code=400, detail="urls 不能为空")
+
+    total = len(urls)
+    notes: List[ParsedNote] = []
+    failed: List[Dict[str, str]] = []
+    queue: asyncio.Queue = asyncio.Queue()
+    semaphore = asyncio.Semaphore(BATCH_PARSE_CONCURRENCY)
+
+    async def parse_single(url: str) -> None:
+        async with semaphore:
+            scraper = None
+            try:
+                scraper = XHSScraper()
+                data = await scraper.scrape_note(url)
+                if not data:
+                    failed.append({"url": url, "error": "抓取失败"})
+                    await queue.put({"type": "progress", "current": len(notes) + len(failed), "total": total, "note": None, "failed": {"url": url, "error": "抓取失败"}})
+                    return
+                note_id = _generate_note_id(url)
+                cover_image = data["images"][0] if data.get("images") else None
+                note = ParsedNote(
+                    id=note_id,
+                    url=url,
+                    title=data.get("title", ""),
+                    content=data.get("content", ""),
+                    tags=data.get("tags", []),
+                    images=data.get("images", []),
+                    coverImage=cover_image,
+                )
+                notes.append(note)
+                await queue.put({"type": "progress", "current": len(notes) + len(failed), "total": total, "note": note.model_dump(), "failed": None})
+            except Exception as e:
+                failed.append({"url": url, "error": str(e)})
+                await queue.put({"type": "progress", "current": len(notes) + len(failed), "total": total, "note": None, "failed": {"url": url, "error": str(e)}})
+            finally:
+                if scraper:
+                    await scraper.close()
+
+    async def event_stream():
+        tasks = [asyncio.create_task(parse_single(u)) for u in urls]
+        for _ in range(total):
+            event = await queue.get()
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        await asyncio.gather(*tasks)
+        yield f"data: {json.dumps({'type': 'done', 'notes': [n.model_dump() for n in notes], 'failed': failed}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # === 新增：图片代理接口（解决CORS问题） ===
@@ -511,31 +579,42 @@ async def download_zip(request: ZipDownloadRequest):
         folder_name = _sanitize_filename(title)
         
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            # 1. 添加文本文件
-            text_filename = f"{folder_name}.txt"
-            text_content = f"{title}\n\n{content}\n\n"
-            if tags:
-                text_content += f"标签: {', '.join(tags)}\n"
-            if origin_url:
-                text_content += f"来源链接: {origin_url}\n"
-            
-            zip_file.writestr(text_filename, text_content.encode('utf-8'))
-            
-            # 2. 下载并添加图片（转换为PNG格式，公众号兼容性更好）
-            for idx, img_url in enumerate(images_to_download, start=1):
-                img_data = await download_image_as_bytes(img_url, convert_to_png=True)
+            # 1. 添加文本文件（可选）
+            if request.include_text:
+                text_filename = f"{folder_name}.txt"
+                text_content = f"{title}\n\n{content}\n\n"
+                if tags:
+                    text_content += f"标签: {', '.join(tags)}\n"
+                if origin_url:
+                    text_content += f"来源链接: {origin_url}\n"
+                zip_file.writestr(text_filename, text_content.encode('utf-8'))
+
+            # 2. 并发下载图片并添加（限制并发数，加快单笔记打包）
+            _IMG_CONCURRENCY = 5
+
+            async def fetch_one(idx_url: tuple) -> tuple[int, dict | None]:
+                idx, img_url = idx_url
+                data = await download_image_as_bytes(img_url, convert_to_png=True)
+                return (idx, data)
+
+            sem = asyncio.Semaphore(_IMG_CONCURRENCY)
+            async def limited_fetch(idx_url: tuple) -> tuple[int, dict | None]:
+                async with sem:
+                    return await fetch_one(idx_url)
+
+            indexed = list(enumerate(images_to_download, start=1))
+            results = await asyncio.gather(*[limited_fetch((i, u)) for i, u in indexed])
+            for idx, img_data in sorted(results, key=lambda x: x[0]):
                 if not img_data:
                     continue
-                
                 mime = img_data.get("mime_type", "image/jpeg").lower()
-                ext = "png"  # 默认使用PNG格式（公众号兼容性更好）
+                ext = "png"
                 if "png" in mime:
                     ext = "png"
                 elif "jpg" in mime or "jpeg" in mime:
                     ext = "jpg"
                 elif "gif" in mime:
                     ext = "gif"
-                
                 img_filename = f"image_{idx}.{ext}"
                 zip_file.writestr(img_filename, img_data["data"])
                 print(f"   - 已添加图片: {img_filename}")

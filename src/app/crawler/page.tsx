@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import { Note, ParseRequest } from "@/types";
 import {
   Loader2,
@@ -12,6 +13,7 @@ import {
   RotateCcw,
   X,
   MoreVertical,
+  ListTodo,
 } from "lucide-react";
 import { cn, getProxyImageUrl } from "@/lib/utils";
 import NotePreviewModal from "@/components/NotePreviewModal";
@@ -19,6 +21,8 @@ import NotePreviewModal from "@/components/NotePreviewModal";
 const STORAGE_KEY_NOTES = "xhs_crawler_notes";
 const STORAGE_KEY_TRASH = "xhs_crawler_trash";
 const STORAGE_KEY_DEFAULT_DIR = "xhs_crawler_default_dir";
+const STORAGE_KEY_PARSE_HISTORY = "xhs_crawler_parse_history";
+const PARSE_HISTORY_MAX = 30; // 解析历史最多保留条数
 const DISPLAY_LIMIT = 20; // 预览区默认最多显示20个
 
 export default function CrawlerPage() {
@@ -34,6 +38,10 @@ export default function CrawlerPage() {
   const [showMore, setShowMore] = useState(false);
   const [activeTab, setActiveTab] = useState<"main" | "trash">("main");
   const [downloadProgress, setDownloadProgress] = useState<{ current: number; total: number; noteTitle?: string } | null>(null);
+  const [batchIncludeText, setBatchIncludeText] = useState(true);
+  const [lastFailedUrls, setLastFailedUrls] = useState<string[]>([]);
+  const [parseHistory, setParseHistory] = useState<string[]>([]);
+  const [showParseHistory, setShowParseHistory] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastValueRef = useRef<string>("");
 
@@ -41,7 +49,8 @@ export default function CrawlerPage() {
   useEffect(() => {
     const savedNotes = localStorage.getItem(STORAGE_KEY_NOTES);
     const savedTrash = localStorage.getItem(STORAGE_KEY_TRASH);
-    
+    const savedHistory = localStorage.getItem(STORAGE_KEY_PARSE_HISTORY);
+
     if (savedNotes) {
       try {
         setNotes(JSON.parse(savedNotes));
@@ -54,6 +63,13 @@ export default function CrawlerPage() {
         setTrash(JSON.parse(savedTrash));
       } catch (e) {
         console.error("加载回收站失败:", e);
+      }
+    }
+    if (savedHistory) {
+      try {
+        setParseHistory(JSON.parse(savedHistory));
+      } catch {
+        // ignore
       }
     }
   }, []);
@@ -193,55 +209,115 @@ export default function CrawlerPage() {
     lastValueRef.current = newValue;
   };
 
-  // 批量解析
+  // 内部：执行流式解析并合并笔记
+  const doParseUrls = async (urls: string[]): Promise<{ notes: Note[]; failed: string[] }> => {
+    const res = await fetch("/api/batch-parse-stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ urls } as ParseRequest),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data?.message || "解析失败");
+    }
+    const reader = res.body?.getReader();
+    const decoder = new TextDecoder();
+    if (!reader) throw new Error("无法读取流式响应");
+
+    let buffer = "";
+    let data: { notes: any[]; failed: any[] } = { notes: [], failed: [] };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n\n");
+      buffer = lines.pop() || "";
+      for (const chunk of lines) {
+        const match = chunk.match(/^data:\s*(.+)$/m);
+        if (!match) continue;
+        try {
+          const event = JSON.parse(match[1].trim()) as {
+            type: string;
+            current?: number;
+            total?: number;
+            notes?: any[];
+            failed?: any[];
+          };
+          if (event.type === "progress" && event.current != null && event.total != null) {
+            setParseProgress({ current: event.current, total: event.total });
+          } else if (event.type === "done") {
+            data = { notes: event.notes || [], failed: event.failed || [] };
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    if (buffer) {
+      const match = buffer.match(/^data:\s*(.+)$/m);
+      if (match) {
+        try {
+          const event = JSON.parse(match[1].trim()) as { type: string; notes?: any[]; failed?: any[] };
+          if (event.type === "done") data = { notes: event.notes || [], failed: event.failed || [] };
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    const newNotes: Note[] = data.notes.map((n: any) => ({
+      ...n,
+      createdAt: Date.now(),
+      isDeleted: false,
+    }));
+    // 从 localStorage 读取当前笔记再合并，避免快速连续解析时状态陈旧导致重复或覆盖
+    let prev: Note[] = [];
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_NOTES);
+      if (raw) prev = JSON.parse(raw);
+    } catch {
+      /* 忽略损坏数据，用内存中的 notes 兜底 */
+      prev = notes;
+    }
+    const existingIds = new Set(prev.map((n) => n.id));
+    const uniqueNewNotes = newNotes.filter((n: Note) => !existingIds.has(n.id));
+    const next = [...prev, ...uniqueNewNotes];
+    setNotes(next);
+    localStorage.setItem(STORAGE_KEY_NOTES, JSON.stringify(next));
+
+    const failedList = (data.failed || []).map((f: { url: string }) => f.url);
+    const allRequestedUrls = [...new Set(urls)];
+    const newHistory = [
+      ...allRequestedUrls,
+      ...parseHistory.filter((u) => !allRequestedUrls.includes(u)),
+    ].slice(0, PARSE_HISTORY_MAX);
+    setParseHistory(newHistory);
+    localStorage.setItem(STORAGE_KEY_PARSE_HISTORY, JSON.stringify(newHistory));
+    setLastFailedUrls(failedList);
+    setParseProgress({ current: urls.length, total: urls.length });
+    return { notes: uniqueNewNotes, failed: failedList };
+  };
+
+  // 批量解析（链接解析区）
   const handleParse = async () => {
     const urls = extractUrls(urlInput)
       .map((url) => url.trim())
       .filter((url) => url.length > 0);
-
     if (urls.length === 0) {
       alert("请粘贴至少一个小红书笔记链接！");
       return;
     }
-
     setIsParsing(true);
     setParseProgress({ current: 0, total: urls.length });
     try {
-      const res = await fetch("/api/batch-parse", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ urls } as ParseRequest),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data?.message || "解析失败");
-      }
-      
-      setParseProgress({ current: urls.length, total: urls.length });
-
-      // 转换数据格式并添加时间戳
-      const newNotes: Note[] = data.notes.map((n: any) => ({
-        ...n,
-        createdAt: Date.now(),
-        isDeleted: false,
-      }));
-
-      // 合并到现有笔记（去重）
-      const existingIds = new Set(notes.map((n) => n.id));
-      const uniqueNewNotes = newNotes.filter((n: Note) => !existingIds.has(n.id));
-      const updatedNotes = [...notes, ...uniqueNewNotes];
-
-      saveNotes(updatedNotes);
-      setUrlInput(""); // 清空输入框
-
-      if (data.failed && data.failed.length > 0) {
+      const { notes: added, failed } = await doParseUrls(urls);
+      setUrlInput("");
+      if (failed.length > 0) {
         alert(
-          `解析完成：成功 ${data.notes.length} 个，失败 ${data.failed.length} 个`
+          `解析完成：成功 ${added.length} 个，失败 ${failed.length} 个。可点击「重试失败链接」仅解析失败项。`
         );
       } else {
-        alert(`成功解析 ${data.notes.length} 个笔记！`);
+        alert(`成功解析 ${added.length} 个笔记！`);
       }
     } catch (err: any) {
       console.error(err);
@@ -254,7 +330,8 @@ export default function CrawlerPage() {
   // 下载笔记（ZIP下载到本地）
   const handleDownload = async (
     note: Note,
-    selectedImageIndices: number[]
+    selectedImageIndices: number[],
+    includeText: boolean = true
   ) => {
     const totalImages = selectedImageIndices.length || note.images.length;
     setDownloadProgress({ current: 0, total: totalImages, noteTitle: note.title });
@@ -278,6 +355,7 @@ export default function CrawlerPage() {
             selectedImageIndices.length === note.images.length
               ? null
               : selectedImageIndices,
+          include_text: includeText,
         }),
       });
       
@@ -335,11 +413,11 @@ export default function CrawlerPage() {
     for (let i = 0; i < selectedNotes.length; i++) {
       const note = selectedNotes[i];
       try {
-        await handleDownload(note, note.images.map((_, i) => i)); // 下载全部图片
+        await handleDownload(note, note.images.map((_, idx) => idx), batchIncludeText);
         successCount++;
         // 如果不是最后一个，等待一小段时间再下载下一个
         if (i < selectedNotes.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 500)); // 延迟500ms
+          await new Promise(resolve => setTimeout(resolve, 300)); // 延迟300ms，减少批量下载总时长
         }
       } catch (e) {
         failCount++;
@@ -447,22 +525,29 @@ export default function CrawlerPage() {
     : displayNotes.slice(0, DISPLAY_LIMIT);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 pb-safe">
       {/* 顶部导航 */}
-      <div className="bg-white border-b shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold text-gray-900">
+      <div className="bg-white border-b shadow-sm sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 py-3 sm:px-6 sm:py-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h1 className="text-lg sm:text-2xl font-bold text-gray-900 truncate">
               小红书笔记爬取工具
             </h1>
             <div className="flex gap-2">
+              <Link
+                href="/crawler/todo"
+                className="inline-flex items-center gap-1.5 min-h-[44px] sm:min-h-0 px-4 py-2.5 sm:py-2 rounded-lg text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 transition-colors touch-manipulation"
+              >
+                <ListTodo className="w-4 h-4 shrink-0" />
+                待办库
+              </Link>
               <button
                 onClick={() => setActiveTab("main")}
                 className={cn(
-                  "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                  "flex-1 sm:flex-none min-h-[44px] sm:min-h-0 px-4 py-2.5 sm:py-2 rounded-lg text-sm font-medium transition-colors touch-manipulation",
                   activeTab === "main"
                     ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300"
                 )}
               >
                 工作台
@@ -470,15 +555,15 @@ export default function CrawlerPage() {
               <button
                 onClick={() => setActiveTab("trash")}
                 className={cn(
-                  "px-4 py-2 rounded-lg text-sm font-medium transition-colors relative",
+                  "flex-1 sm:flex-none min-h-[44px] sm:min-h-0 px-4 py-2.5 sm:py-2 rounded-lg text-sm font-medium transition-colors relative touch-manipulation",
                   activeTab === "trash"
                     ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300"
                 )}
               >
                 回收站
                 {trash.length > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+                  <span className="absolute -top-0.5 -right-0.5 sm:-top-1 sm:-right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
                     {trash.length}
                   </span>
                 )}
@@ -488,12 +573,12 @@ export default function CrawlerPage() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6">
+      <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 sm:py-6">
         {activeTab === "main" ? (
           <>
             {/* === 解析区 === */}
-            <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 mb-4 sm:mb-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-3 sm:mb-4">
                 链接解析
               </h2>
               <div className="space-y-4">
@@ -511,12 +596,63 @@ export default function CrawlerPage() {
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none font-mono text-sm"
                   />
                 </div>
+                {/* 重试失败链接 + 解析历史 */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {lastFailedUrls.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUrlInput(lastFailedUrls.join("\n"));
+                        setLastFailedUrls([]);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors"
+                    >
+                      重试失败链接 ({lastFailedUrls.length})
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowParseHistory((v) => !v)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+                  >
+                    {showParseHistory ? "收起" : "解析历史"}
+                    {parseHistory.length > 0 && (
+                      <span className="text-gray-400">({parseHistory.length})</span>
+                    )}
+                  </button>
+                </div>
+                {showParseHistory && parseHistory.length > 0 && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 max-h-40 overflow-y-auto">
+                    <p className="text-xs text-gray-500 mb-2">点击链接填入输入框（可多选后解析）</p>
+                    <ul className="space-y-1">
+                      {parseHistory.slice(0, 20).map((url, i) => (
+                        <li key={i}>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setUrlInput((prev) =>
+                                prev ? prev + "\n" + url : url
+                              )
+                            }
+                            className="text-left w-full text-sm text-blue-600 hover:underline truncate block font-mono"
+                            title={url}
+                          >
+                            {url}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    {parseHistory.length > 20 && (
+                      <p className="text-xs text-gray-400 mt-1">仅显示最近 20 条</p>
+                    )}
+                  </div>
+                )}
                 <div className="space-y-3">
-                  <div className="flex items-center gap-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
                     <button
                       onClick={handleParse}
                       disabled={isParsing}
-                      className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      className="w-full sm:w-auto min-h-[44px] sm:min-h-0 inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors touch-manipulation"
                     >
                       {isParsing ? (
                         <>
@@ -537,8 +673,7 @@ export default function CrawlerPage() {
                   {isParsing && parseProgress.total > 0 && (
                     <div className="space-y-1">
                       <div className="flex items-center justify-between text-sm text-gray-600">
-                        <span>正在解析...</span>
-                        <span>{parseProgress.current}/{parseProgress.total}</span>
+                        <span>已解析 {parseProgress.current}/{parseProgress.total}</span>
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
                         <div
@@ -555,19 +690,19 @@ export default function CrawlerPage() {
             </section>
 
             {/* === 预览区 === */}
-            <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-4">
+            <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between mb-4">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-4">
                   <button
                     onClick={() => {
                       setIsBatchMode(!isBatchMode);
                       setSelectedNoteIds(new Set());
                     }}
                     className={cn(
-                      "inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                      "min-h-[44px] sm:min-h-0 inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 rounded-lg text-sm font-medium transition-colors touch-manipulation",
                       isBatchMode
                         ? "bg-blue-600 text-white"
-                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300"
                     )}
                   >
                     {isBatchMode ? (
@@ -599,17 +734,26 @@ export default function CrawlerPage() {
                   )}
                 </div>
                 {isBatchMode && selectedNoteIds.size > 0 && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                    <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none min-h-[44px] sm:min-h-0 items-center">
+                      <input
+                        type="checkbox"
+                        checked={batchIncludeText}
+                        onChange={(e) => setBatchIncludeText(e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      同时下载文本
+                    </label>
                     <button
                       onClick={handleBatchDownload}
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+                      className="min-h-[44px] sm:min-h-0 inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 active:bg-green-800 transition-colors touch-manipulation"
                     >
                       <Download className="w-4 h-4" />
                       一键下载
                     </button>
                     <button
                       onClick={handleBatchDelete}
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
+                      className="min-h-[44px] sm:min-h-0 inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 active:bg-red-800 transition-colors touch-manipulation"
                     >
                       <Trash2 className="w-4 h-4" />
                       批量删除
@@ -625,7 +769,7 @@ export default function CrawlerPage() {
                 </div>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
                     {visibleNotes.map((note) => (
                       <div
                         key={note.id}
@@ -703,20 +847,20 @@ export default function CrawlerPage() {
           </>
         ) : (
           /* === 回收站 === */
-          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
+          <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900">回收站</h2>
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-4">
                 <button
                   onClick={() => {
                     setIsBatchMode(!isBatchMode);
                     setSelectedNoteIds(new Set());
                   }}
                   className={cn(
-                    "inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                    "min-h-[44px] sm:min-h-0 inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 rounded-lg text-sm font-medium transition-colors touch-manipulation",
                     isBatchMode
                       ? "bg-blue-600 text-white"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300"
                   )}
                 >
                   {isBatchMode ? (
@@ -742,17 +886,17 @@ export default function CrawlerPage() {
                         : "全选"}
                     </button>
                     {selectedNoteIds.size > 0 && (
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           onClick={handleBatchRestore}
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+                          className="min-h-[44px] sm:min-h-0 inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 active:bg-green-800 transition-colors touch-manipulation"
                         >
                           <RotateCcw className="w-4 h-4" />
                           批量恢复
                         </button>
                         <button
                           onClick={handleBatchPermanentDelete}
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
+                          className="min-h-[44px] sm:min-h-0 inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 active:bg-red-800 transition-colors touch-manipulation"
                         >
                           <Trash2 className="w-4 h-4" />
                           批量删除
@@ -770,7 +914,7 @@ export default function CrawlerPage() {
                 <p>回收站为空</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
                 {trash.map((note) => (
                   <div
                     key={note.id}
@@ -846,7 +990,7 @@ export default function CrawlerPage() {
 
       {/* 下载进度条 */}
       {downloadProgress && (
-        <div className="fixed bottom-6 right-6 bg-white rounded-lg shadow-lg border border-gray-200 p-4 min-w-[300px] z-50">
+        <div className="fixed left-4 right-4 bottom-4 sm:left-auto sm:right-6 sm:bottom-6 sm:min-w-[300px] bg-white rounded-lg shadow-lg border border-gray-200 p-4 z-50 max-w-full">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium text-gray-900">
               正在下载: {downloadProgress.noteTitle?.slice(0, 20)}...

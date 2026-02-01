@@ -2,14 +2,14 @@
 
 import { useState, useEffect } from "react";
 import { Note } from "@/types";
-import { X, ChevronLeft, ChevronRight, Download, Check } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Download, Check, Copy } from "lucide-react";
 import { cn, getProxyImageUrl } from "@/lib/utils";
 
 interface NotePreviewModalProps {
   note: Note | null;
   isOpen: boolean;
   onClose: () => void;
-  onDownload: (note: Note, selectedImageIndices: number[]) => void;
+  onDownload: (note: Note, selectedImageIndices: number[], includeText: boolean) => void;
 }
 
 export default function NotePreviewModal({
@@ -20,6 +20,8 @@ export default function NotePreviewModal({
 }: NotePreviewModalProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [selectedImages, setSelectedImages] = useState<Set<number>>(new Set());
+  const [includeText, setIncludeText] = useState(true);
+  const [copySuccess, setCopySuccess] = useState(false);
 
   useEffect(() => {
     if (note && isOpen) {
@@ -42,8 +44,28 @@ export default function NotePreviewModal({
   };
 
   const handleDownload = () => {
-    onDownload(note, Array.from(selectedImages).sort((a, b) => a - b));
+    onDownload(note, Array.from(selectedImages).sort((a, b) => a - b), includeText);
     onClose();
+  };
+
+  const handleCopyText = async () => {
+    const text = [
+      note.title,
+      "",
+      note.content,
+      "",
+      note.tags.length ? "标签: " + note.tags.join(", ") : "",
+      note.url ? "来源链接: " + note.url : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch {
+      alert("复制失败，请手动选择复制");
+    }
   };
 
   const nextImage = () => {
@@ -61,34 +83,43 @@ export default function NotePreviewModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="relative w-full max-w-6xl max-h-[90vh] bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+      <div className="relative w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-6xl sm:rounded-2xl bg-white shadow-2xl overflow-hidden flex flex-col">
         {/* 头部 */}
-        <div className="flex items-center justify-between p-4 border-b bg-gray-50">
-          <h2 className="text-lg font-semibold text-gray-900 truncate flex-1">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 p-3 sm:p-4 border-b bg-gray-50 flex-shrink-0">
+          <h2 className="text-base sm:text-lg font-semibold text-gray-900 truncate flex-1 min-w-0">
             {note.title}
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none shrink-0">
+              <input
+                type="checkbox"
+                checked={includeText}
+                onChange={(e) => setIncludeText(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="whitespace-nowrap">同时下载文本</span>
+            </label>
             <button
               onClick={handleDownload}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              className="min-h-[44px] sm:min-h-0 inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors touch-manipulation"
             >
-              <Download className="w-4 h-4" />
-              下载 ({selectedImages.size}/{note.images.length})
+              <Download className="w-4 h-4 shrink-0" />
+              <span className="whitespace-nowrap">下载 ({selectedImages.size}/{note.images.length})</span>
             </button>
             <button
               onClick={onClose}
-              className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
+              className="min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 p-2 hover:bg-gray-200 active:bg-gray-300 rounded-lg transition-colors touch-manipulation flex items-center justify-center"
             >
               <X className="w-5 h-5 text-gray-600" />
             </button>
           </div>
         </div>
 
-        {/* 内容区 */}
-        <div className="flex-1 overflow-hidden flex">
-          {/* 左侧：图片轮播 */}
-          <div className="w-1/2 border-r bg-gray-100 relative flex items-center justify-center">
+        {/* 内容区：移动端上下布局，桌面端左右布局 */}
+        <div className="flex-1 overflow-hidden flex flex-col md:flex-row min-h-0">
+          {/* 左侧/上方：图片轮播 */}
+          <div className="w-full md:w-1/2 h-[40vh] md:h-auto min-h-[200px] border-b md:border-b-0 md:border-r border-gray-200 bg-gray-100 relative flex items-center justify-center flex-shrink-0">
             {note.images.length > 0 ? (
               <>
                 {/* 图片 */}
@@ -106,18 +137,18 @@ export default function NotePreviewModal({
                     }}
                   />
 
-                  {/* 左右箭头（桌面端） */}
+                  {/* 左右箭头：移动端加大点击区域 */}
                   {note.images.length > 1 && (
                     <>
                       <button
                         onClick={prevImage}
-                        className="absolute left-4 top-1/2 -translate-y-1/2 p-2 bg-white/90 hover:bg-white rounded-full shadow-lg transition-all"
+                        className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 p-2 sm:p-2 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center bg-white/90 hover:bg-white active:bg-gray-100 rounded-full shadow-lg transition-all touch-manipulation"
                       >
                         <ChevronLeft className="w-6 h-6 text-gray-700" />
                       </button>
                       <button
                         onClick={nextImage}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 p-2 bg-white/90 hover:bg-white rounded-full shadow-lg transition-all"
+                        className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 p-2 sm:p-2 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center bg-white/90 hover:bg-white active:bg-gray-100 rounded-full shadow-lg transition-all touch-manipulation"
                       >
                         <ChevronRight className="w-6 h-6 text-gray-700" />
                       </button>
@@ -143,20 +174,18 @@ export default function NotePreviewModal({
                   )}
                 </div>
 
-                {/* 图片选择区域（底部缩略图） */}
-                <div className="absolute bottom-0 left-0 right-0 bg-black/50 p-4">
-                  <div className="flex gap-2 overflow-x-auto">
+                {/* 图片选择区域（底部缩略图）：移动端略大便于点击 */}
+                <div className="absolute bottom-0 left-0 right-0 bg-black/50 p-2 sm:p-4">
+                  <div className="flex gap-2 overflow-x-auto pb-safe">
                     {note.images.map((img, idx) => (
                       <button
                         key={idx}
-                        onClick={() => {
-                          setCurrentImageIndex(idx);
-                        }}
+                        onClick={() => setCurrentImageIndex(idx)}
                         className={cn(
-                          "relative flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border-2 transition-all",
+                          "relative flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-lg overflow-hidden border-2 transition-all touch-manipulation",
                           idx === currentImageIndex
                             ? "border-blue-600 scale-105"
-                            : "border-transparent hover:border-gray-400"
+                            : "border-transparent hover:border-gray-400 active:border-gray-500"
                         )}
                       >
                         <img
@@ -198,8 +227,8 @@ export default function NotePreviewModal({
             )}
           </div>
 
-          {/* 右侧：文字内容 */}
-          <div className="w-1/2 overflow-y-auto p-6">
+          {/* 右侧/下方：文字内容 */}
+          <div className="w-full md:w-1/2 overflow-y-auto p-4 sm:p-6 flex-1 min-h-0">
             <div className="space-y-4">
               <div>
                 <h3 className="text-xl font-bold text-gray-900 mb-2">
@@ -220,6 +249,22 @@ export default function NotePreviewModal({
               </div>
 
               <div className="prose prose-sm max-w-none">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-sm font-medium text-gray-500">正文</span>
+                  <button
+                    type="button"
+                    onClick={handleCopyText}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                      copySuccess
+                        ? "bg-green-100 text-green-700"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    )}
+                  >
+                    <Copy className="w-4 h-4" />
+                    {copySuccess ? "已复制" : "一键复制"}
+                  </button>
+                </div>
                 <div className="whitespace-pre-wrap text-gray-700 leading-relaxed">
                   {note.content}
                 </div>
