@@ -180,6 +180,10 @@ xhs-factory/
 ### 后端环境变量（可选）
 
 - `BATCH_PARSE_CONCURRENCY` - 批量解析并发数（默认 `5`，范围 1～10）。目标站限流严时可调小。
+- `CRAWL_INTERVAL_MIN` / `CRAWL_INTERVAL_MAX` - 每条笔记解析完成后的等待秒数（默认 2～5），减轻限流。
+- `IMAGE_DOWNLOAD_DELAY_MIN` / `IMAGE_DOWNLOAD_DELAY_MAX` - ZIP 打包时每张图片之间的延迟秒数（默认 0.2～0.5）。
+- `PARSE_RETRY_TIMES` - 单条笔记抓取失败时的重试次数（默认 `1`，即最多共 2 次尝试）；限流不重试。
+- `PARSE_RETRY_DELAY_MIN` / `PARSE_RETRY_DELAY_MAX` - 重试前等待秒数（默认 1～2）。
 
 ## 部署说明
 

@@ -39,7 +39,9 @@ export default function CrawlerPage() {
   const [activeTab, setActiveTab] = useState<"main" | "trash">("main");
   const [downloadProgress, setDownloadProgress] = useState<{ current: number; total: number; noteTitle?: string } | null>(null);
   const [batchIncludeText, setBatchIncludeText] = useState(true);
-  const [lastFailedUrls, setLastFailedUrls] = useState<string[]>([]);
+  /** 最近一次解析失败的链接及原因，用于展示详情和重试 */
+  const [lastFailedDetails, setLastFailedDetails] = useState<Array<{ url: string; error: string }>>([]);
+  const lastFailedUrls = lastFailedDetails.map((f) => f.url);
   const [parseHistory, setParseHistory] = useState<string[]>([]);
   const [showParseHistory, setShowParseHistory] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -210,7 +212,9 @@ export default function CrawlerPage() {
   };
 
   // 内部：执行流式解析并合并笔记
-  const doParseUrls = async (urls: string[]): Promise<{ notes: Note[]; failed: string[] }> => {
+  const doParseUrls = async (
+    urls: string[]
+  ): Promise<{ notes: Note[]; failed: Array<{ url: string; error: string }> }> => {
     const res = await fetch("/api/batch-parse-stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -285,7 +289,10 @@ export default function CrawlerPage() {
     setNotes(next);
     localStorage.setItem(STORAGE_KEY_NOTES, JSON.stringify(next));
 
-    const failedList = (data.failed || []).map((f: { url: string }) => f.url);
+    const failedList = (data.failed || []).map((f: { url: string; error?: string }) => ({
+      url: f.url,
+      error: typeof f.error === "string" ? f.error : "抓取失败",
+    }));
     const allRequestedUrls = [...new Set(urls)];
     const newHistory = [
       ...allRequestedUrls,
@@ -293,7 +300,7 @@ export default function CrawlerPage() {
     ].slice(0, PARSE_HISTORY_MAX);
     setParseHistory(newHistory);
     localStorage.setItem(STORAGE_KEY_PARSE_HISTORY, JSON.stringify(newHistory));
-    setLastFailedUrls(failedList);
+    setLastFailedDetails(failedList);
     setParseProgress({ current: urls.length, total: urls.length });
     return { notes: uniqueNewNotes, failed: failedList };
   };
@@ -313,8 +320,9 @@ export default function CrawlerPage() {
       const { notes: added, failed } = await doParseUrls(urls);
       setUrlInput("");
       if (failed.length > 0) {
+        const firstError = failed[0]?.error ?? "未知错误";
         alert(
-          `解析完成：成功 ${added.length} 个，失败 ${failed.length} 个。可点击「重试失败链接」仅解析失败项。`
+          `解析完成：成功 ${added.length} 个，失败 ${failed.length} 个。失败原因已显示在下方「解析失败详情」中，可点击「重试失败链接」仅解析失败项。\n\n首条失败原因：${firstError}`
         );
       } else {
         alert(`成功解析 ${added.length} 个笔记！`);
@@ -603,7 +611,7 @@ export default function CrawlerPage() {
                       type="button"
                       onClick={() => {
                         setUrlInput(lastFailedUrls.join("\n"));
-                        setLastFailedUrls([]);
+                        setLastFailedDetails([]);
                       }}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors"
                     >
@@ -621,6 +629,21 @@ export default function CrawlerPage() {
                     )}
                   </button>
                 </div>
+                {lastFailedDetails.length > 0 && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+                    <p className="text-sm font-medium text-amber-800">解析失败详情（便于排查与重试）</p>
+                    <ul className="space-y-2 max-h-48 overflow-y-auto">
+                      {lastFailedDetails.map((f, i) => (
+                        <li key={i} className="text-sm">
+                          <span className="font-mono text-gray-700 truncate block" title={f.url}>
+                            {f.url}
+                          </span>
+                          <span className="text-amber-700 block mt-0.5">{f.error}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {showParseHistory && parseHistory.length > 0 && (
                   <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 max-h-40 overflow-y-auto">
                     <p className="text-xs text-gray-500 mb-2">点击链接填入输入框（可多选后解析）</p>

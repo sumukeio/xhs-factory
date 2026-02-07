@@ -1,6 +1,7 @@
 import os
 import base64
 import json
+import random
 import httpx
 import uvicorn
 import hashlib
@@ -15,6 +16,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
 from scraper import XHSScraper
+from exception import RateLimitError, DataEmptyError, DataFetchError
 
 # 加载环境变量
 load_dotenv()
@@ -39,6 +41,14 @@ os.makedirs(DOWNLOAD_ROOT, exist_ok=True)
 
 # 批量解析并发数（环境变量 BATCH_PARSE_CONCURRENCY，默认 5，限流严时可调小）
 BATCH_PARSE_CONCURRENCY = max(1, min(10, int(os.getenv("BATCH_PARSE_CONCURRENCY", "5"))))
+
+# 抓取间隔（秒）：每条笔记解析完成后等待再处理下一条，减轻限流
+CRAWL_INTERVAL_MIN = float(os.getenv("CRAWL_INTERVAL_MIN", "2"))
+CRAWL_INTERVAL_MAX = float(os.getenv("CRAWL_INTERVAL_MAX", "5"))
+
+# 图片下载间隔（秒）：ZIP 打包时每张图之间随机延迟，降低 CDN 限流
+IMAGE_DOWNLOAD_DELAY_MIN = float(os.getenv("IMAGE_DOWNLOAD_DELAY_MIN", "0.2"))
+IMAGE_DOWNLOAD_DELAY_MAX = float(os.getenv("IMAGE_DOWNLOAD_DELAY_MAX", "0.5"))
 
 if not GOOGLE_API_KEY:
     print("ℹ️  提示: 未检测到 GEMINI_API_KEY，AI 生成功能将不可用（爬取功能不受影响）。")
@@ -261,6 +271,14 @@ def _generate_note_id(url: str) -> str:
     return hashlib.md5(url.encode()).hexdigest()[:12]
 
 
+def _is_note_empty(data: Dict) -> bool:
+    """判断爬虫返回的笔记是否无有效内容（标题、正文、图片全无则视为空）"""
+    title = (data.get("title") or "").strip()
+    content = (data.get("content") or "").strip()
+    images = data.get("images") or []
+    return not title and not content and not images
+
+
 async def _save_note_to_disk(data: Dict, selected_indices: List[int] | None = None) -> Dict:
     """
     根据爬虫返回的数据，将图片和文字保存到本地
@@ -307,6 +325,9 @@ async def _save_note_to_disk(data: Dict, selected_indices: List[int] | None = No
         images_to_download = [images[i] for i in selected_indices if 0 <= i < len(images)]
     
     for idx, img_url in enumerate(images_to_download, start=1):
+        await asyncio.sleep(
+            random.uniform(IMAGE_DOWNLOAD_DELAY_MIN, IMAGE_DOWNLOAD_DELAY_MAX)
+        )
         img_data = await download_image_as_bytes(img_url)
         if not img_data:
             continue
@@ -442,10 +463,15 @@ async def batch_parse(request: BatchParseRequest):
                 if not data:
                     failed.append({"url": url, "error": "抓取失败"})
                     return
-                
+                if _is_note_empty(data):
+                    err_msg = "笔记内容为空：未解析到标题、正文或图片"
+                    failed.append({"url": url, "error": err_msg})
+                    print(f"❌ [批量解析] 空笔记 {url}: {err_msg}")
+                    return
+
                 note_id = _generate_note_id(url)
                 cover_image = data['images'][0] if data.get('images') else None
-                
+
                 notes.append(ParsedNote(
                     id=note_id,
                     url=url,
@@ -456,11 +482,18 @@ async def batch_parse(request: BatchParseRequest):
                     coverImage=cover_image
                 ))
                 print(f"✅ [批量解析] 成功: {data.get('title', '')[:30]}")
+            except (RateLimitError, DataEmptyError, DataFetchError) as e:
+                err_msg = e.message if getattr(e, "message", None) else str(e)
+                print(f"❌ [批量解析] 失败 {url}: {err_msg}")
+                failed.append({"url": url, "error": err_msg})
             except Exception as e:
                 print(f"❌ [批量解析] 失败 {url}: {e}")
                 failed.append({"url": url, "error": str(e)})
             finally:
                 await scraper.close()
+                # 抓取间隔：每条（成功或失败）后随机等待，减轻限流
+                delay = random.uniform(CRAWL_INTERVAL_MIN, CRAWL_INTERVAL_MAX)
+                await asyncio.sleep(delay)
     
     # 并发执行所有解析任务
     await asyncio.gather(*[parse_single(url) for url in request.urls])
@@ -493,8 +526,16 @@ async def batch_parse_stream(request: BatchParseRequest):
                 scraper = XHSScraper()
                 data = await scraper.scrape_note(url)
                 if not data:
-                    failed.append({"url": url, "error": "抓取失败"})
-                    await queue.put({"type": "progress", "current": len(notes) + len(failed), "total": total, "note": None, "failed": {"url": url, "error": "抓取失败"}})
+                    err_msg = "抓取失败（未返回数据）"
+                    failed.append({"url": url, "error": err_msg})
+                    print(f"❌ [批量解析-流] 失败 url={url} error={err_msg}")
+                    await queue.put({"type": "progress", "current": len(notes) + len(failed), "total": total, "note": None, "failed": {"url": url, "error": err_msg}})
+                    return
+                if _is_note_empty(data):
+                    err_msg = "笔记内容为空：未解析到标题、正文或图片"
+                    failed.append({"url": url, "error": err_msg})
+                    print(f"❌ [批量解析-流] 空笔记 url={url} error={err_msg}")
+                    await queue.put({"type": "progress", "current": len(notes) + len(failed), "total": total, "note": None, "failed": {"url": url, "error": err_msg}})
                     return
                 note_id = _generate_note_id(url)
                 cover_image = data["images"][0] if data.get("images") else None
@@ -509,12 +550,22 @@ async def batch_parse_stream(request: BatchParseRequest):
                 )
                 notes.append(note)
                 await queue.put({"type": "progress", "current": len(notes) + len(failed), "total": total, "note": note.model_dump(), "failed": None})
+            except (RateLimitError, DataEmptyError, DataFetchError) as e:
+                err_msg = e.message if getattr(e, "message", None) else str(e)
+                failed.append({"url": url, "error": err_msg})
+                print(f"❌ [批量解析-流] 失败 url={url} error={err_msg}")
+                await queue.put({"type": "progress", "current": len(notes) + len(failed), "total": total, "note": None, "failed": {"url": url, "error": err_msg}})
             except Exception as e:
-                failed.append({"url": url, "error": str(e)})
-                await queue.put({"type": "progress", "current": len(notes) + len(failed), "total": total, "note": None, "failed": {"url": url, "error": str(e)}})
+                err_msg = str(e)
+                failed.append({"url": url, "error": err_msg})
+                print(f"❌ [批量解析-流] 失败 url={url} error={err_msg}")
+                await queue.put({"type": "progress", "current": len(notes) + len(failed), "total": total, "note": None, "failed": {"url": url, "error": err_msg}})
             finally:
                 if scraper:
                     await scraper.close()
+                # 抓取间隔：每条（成功或失败）后随机等待，减轻限流
+                delay = random.uniform(CRAWL_INTERVAL_MIN, CRAWL_INTERVAL_MAX)
+                await asyncio.sleep(delay)
 
     async def event_stream():
         tasks = [asyncio.create_task(parse_single(u)) for u in urls]
@@ -589,11 +640,14 @@ async def download_zip(request: ZipDownloadRequest):
                     text_content += f"来源链接: {origin_url}\n"
                 zip_file.writestr(text_filename, text_content.encode('utf-8'))
 
-            # 2. 并发下载图片并添加（限制并发数，加快单笔记打包）
+            # 2. 并发下载图片并添加（限制并发数；每张图前加随机延迟，减轻 CDN 限流）
             _IMG_CONCURRENCY = 5
 
             async def fetch_one(idx_url: tuple) -> tuple[int, dict | None]:
                 idx, img_url = idx_url
+                await asyncio.sleep(
+                    random.uniform(IMAGE_DOWNLOAD_DELAY_MIN, IMAGE_DOWNLOAD_DELAY_MAX)
+                )
                 data = await download_image_as_bytes(img_url, convert_to_png=True)
                 return (idx, data)
 
