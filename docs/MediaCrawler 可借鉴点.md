@@ -161,3 +161,36 @@
 - **工程化**：统一日志、API 与爬虫解耦、资源路径兼容打包，对长期维护和分发有帮助。
 
 以上均可按「当前需求 + 维护成本」分阶段采纳，不必一次性照搬。
+
+---
+
+## 七、与 MediaCrawler 的差异：为何「参考之后反而容易出问题」
+
+### 笔记详情获取方式的根本差异
+
+| 维度 | MediaCrawler | xhs-factory |
+|------|--------------|-------------|
+| **输入** | 配置里是**标准 explore URL**（含 note_id、xsec_token、xsec_source），或从搜索/创作者页得到 note_id + xsec | 用户粘贴**任意链接**（多为 xhslink 短链，也可能是已复制的 explore 链接） |
+| **手段** | 先调**接口** `get_note_by_id`（需签名 + Cookie），失败再用 **httpx 请求** `https://www.xiaohongshu.com/explore/{note_id}?xsec_token=...` 拿 HTML，正则抠 `__INITIAL_STATE__` | **仅 Playwright 打开用户给的链接**，等页面加载后读 `window.__INITIAL_STATE__`，无登录、无签名 |
+| **场景** | 搜索/创作者/指定笔记列表 → 已有 note_id 与 xsec → API 或一次 HTTP 即可 | 用户给一条链接 → 必须浏览器打开并跟随跳转（xhslink→笔记页） |
+
+因此 MediaCrawler **没有**「用户贴 xhslink → 先 HTTP 跟跳再决定用哪个 URL」「等标题从首页变成笔记页」这类逻辑；他们的笔记详情是「已知 note_id + xsec 后请求固定 URL 或 API」。
+
+### 参考后我们加过、且可能削弱稳定性的改动（已回滚/放宽）
+
+1. **xhslink HTTP 预解析**  
+   用 httpx 跟跳 xhslink；无 Cookie 时经常得到首页，我们就「改用原 xhslink、用浏览器打开」。原来则是**直接** `page.goto(用户链接)`，由浏览器自然跳转。预解析增加了超时与分支，反而可能更不稳。  
+   **当前**：已回滚，**一律直接 `page.goto(url)`**，不再做 HTTP 预解析。
+
+2. **等标题变为笔记页**  
+   若 URL 是 xhslink 或非 explore，就 `wait_for_function` 等标题 ≠「小红书 - 你的生活兴趣社区」。若加载慢或先渲染成别的，25s 内没变就超时；原来没有这步，直接 sleep 后读 state 有时能读到。  
+   **当前**：已去掉「等标题」逻辑，只保留 goto + sleep 2.5s + 读 state。
+
+3. **过严的 wait_for_function**  
+   之前要求 `noteDetailMap` 里第一条笔记**已有** title/desc/images 才返回 state。若页面是先注入空壳再异步填内容，就会一直等不到。  
+   **当前**：改为只等 **noteDetailMap 存在且至少有一个 key** 就取 state；内容是否为空在 **extract_note_from_state** 里判断并抛 **DataEmptyError**。
+
+### 宜借鉴 vs 不宜照搬（小结）
+
+- **宜借鉴（已保留）**：抓取间隔、单条失败重试、限流/错误类型（RateLimitError、DataEmptyError）、解析与抓取分离、图片下载间隔、详细日志（XHS_CRAWL_DEBUG）。这些不改变「打开谁、等什么」。
+- **不宜照搬**：笔记详情获取流程（API 优先、固定 explore URL + httpx）——我们无登录无签名，只能 Playwright 打开用户链接；以及「xhslink 预解析 + 等标题 + 过严的 state 条件」已回滚/放宽，恢复「直接 goto + 简单等 noteDetailMap 有 key」的可靠路径。

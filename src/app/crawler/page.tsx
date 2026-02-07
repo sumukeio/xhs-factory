@@ -62,7 +62,11 @@ export default function CrawlerPage() {
     }
     if (savedTrash) {
       try {
-        setTrash(JSON.parse(savedTrash));
+        const parsed: Note[] = JSON.parse(savedTrash);
+        // 按 id 去重（保留最后一条），避免重复 key 导致 React 报错
+        const byId = new Map<string, Note>();
+        parsed.forEach((n) => byId.set(n.id, n));
+        setTrash(Array.from(byId.values()));
       } catch (e) {
         console.error("加载回收站失败:", e);
       }
@@ -459,7 +463,10 @@ export default function CrawlerPage() {
     }));
 
     saveNotes(remainingNotes);
-    saveTrash([...trash, ...deletedNotes]);
+    // 按 id 去重：若回收站已有同 id，只保留新移入的，避免重复条目导致 React key 冲突
+    const existingIds = new Set(deletedNotes.map((n) => n.id));
+    const trashWithoutDuplicates = trash.filter((n) => !existingIds.has(n.id));
+    saveTrash([...trashWithoutDuplicates, ...deletedNotes]);
     setSelectedNoteIds(new Set());
     setIsBatchMode(false);
   };
@@ -517,13 +524,25 @@ export default function CrawlerPage() {
     setSelectedNoteIds(newSelected);
   };
 
-  // 全选/取消全选
+  // 全选/取消全选（批量模式下切换选中）
   const toggleSelectAll = () => {
     const currentNotes = activeTab === "main" ? notes : trash;
     if (selectedNoteIds.size === currentNotes.length) {
       setSelectedNoteIds(new Set());
     } else {
       setSelectedNoteIds(new Set(currentNotes.map((n) => n.id)));
+    }
+  };
+
+  // 点击「全选」按钮：进入批量模式并选中当前列表全部，或退出批量并清空选中
+  const handleFullSelectClick = () => {
+    if (isBatchMode) {
+      setIsBatchMode(false);
+      setSelectedNoteIds(new Set());
+    } else {
+      const currentNotes = activeTab === "main" ? notes : trash;
+      setSelectedNoteIds(new Set(currentNotes.map((n) => n.id)));
+      setIsBatchMode(true);
     }
   };
 
@@ -717,10 +736,7 @@ export default function CrawlerPage() {
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between mb-4">
                 <div className="flex flex-wrap items-center gap-2 sm:gap-4">
                   <button
-                    onClick={() => {
-                      setIsBatchMode(!isBatchMode);
-                      setSelectedNoteIds(new Set());
-                    }}
+                    onClick={handleFullSelectClick}
                     className={cn(
                       "min-h-[44px] sm:min-h-0 inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 rounded-lg text-sm font-medium transition-colors touch-manipulation",
                       isBatchMode
@@ -729,50 +745,21 @@ export default function CrawlerPage() {
                     )}
                   >
                     {isBatchMode ? (
-                      <>
-                        <CheckSquare className="w-4 h-4" />
-                        批量操作中
-                      </>
+                      <CheckSquare className="w-4 h-4" />
                     ) : (
-                      <>
-                        <Square className="w-4 h-4" />
-                        批量选中
-                      </>
+                      <Square className="w-4 h-4" />
                     )}
+                    <span>全选</span>
                   </button>
-                  {isBatchMode && (
-                    <>
-                      <button
-                        onClick={toggleSelectAll}
-                        className="text-sm text-blue-600 hover:text-blue-700"
-                      >
-                        {selectedNoteIds.size === notes.length
-                          ? "取消全选"
-                          : "全选"}
-                      </button>
-                      <span className="text-sm text-gray-500">
-                        已选中 {selectedNoteIds.size} 个
-                      </span>
-                    </>
-                  )}
                 </div>
-                {isBatchMode && selectedNoteIds.size > 0 && (
-                  <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                    <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none min-h-[44px] sm:min-h-0 items-center">
-                      <input
-                        type="checkbox"
-                        checked={batchIncludeText}
-                        onChange={(e) => setBatchIncludeText(e.target.checked)}
-                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      同时下载文本
-                    </label>
+                {isBatchMode && (
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 sm:ml-auto">
                     <button
                       onClick={handleBatchDownload}
                       className="min-h-[44px] sm:min-h-0 inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 active:bg-green-800 transition-colors touch-manipulation"
                     >
                       <Download className="w-4 h-4" />
-                      一键下载
+                      批量下载
                     </button>
                     <button
                       onClick={handleBatchDelete}
@@ -871,14 +858,11 @@ export default function CrawlerPage() {
         ) : (
           /* === 回收站 === */
           <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900">回收站</h2>
               <div className="flex flex-wrap items-center gap-2 sm:gap-4">
                 <button
-                  onClick={() => {
-                    setIsBatchMode(!isBatchMode);
-                    setSelectedNoteIds(new Set());
-                  }}
+                  onClick={handleFullSelectClick}
                   className={cn(
                     "min-h-[44px] sm:min-h-0 inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 rounded-lg text-sm font-medium transition-colors touch-manipulation",
                     isBatchMode
@@ -887,46 +871,29 @@ export default function CrawlerPage() {
                   )}
                 >
                   {isBatchMode ? (
-                    <>
-                      <CheckSquare className="w-4 h-4" />
-                      批量操作中
-                    </>
+                    <CheckSquare className="w-4 h-4" />
                   ) : (
-                    <>
-                      <Square className="w-4 h-4" />
-                      批量选中
-                    </>
+                    <Square className="w-4 h-4" />
                   )}
+                  <span>全选</span>
                 </button>
                 {isBatchMode && (
-                  <>
+                  <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
                     <button
-                      onClick={toggleSelectAll}
-                      className="text-sm text-blue-600 hover:text-blue-700"
+                      onClick={handleBatchRestore}
+                      className="min-h-[44px] sm:min-h-0 inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 active:bg-green-800 transition-colors touch-manipulation"
                     >
-                      {selectedNoteIds.size === trash.length
-                        ? "取消全选"
-                        : "全选"}
+                      <RotateCcw className="w-4 h-4" />
+                      批量恢复
                     </button>
-                    {selectedNoteIds.size > 0 && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          onClick={handleBatchRestore}
-                          className="min-h-[44px] sm:min-h-0 inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 active:bg-green-800 transition-colors touch-manipulation"
-                        >
-                          <RotateCcw className="w-4 h-4" />
-                          批量恢复
-                        </button>
-                        <button
-                          onClick={handleBatchPermanentDelete}
-                          className="min-h-[44px] sm:min-h-0 inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 active:bg-red-800 transition-colors touch-manipulation"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                          批量删除
-                        </button>
-                      </div>
-                    )}
-                  </>
+                    <button
+                      onClick={handleBatchPermanentDelete}
+                      className="min-h-[44px] sm:min-h-0 inline-flex items-center gap-2 px-4 py-2.5 sm:py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 active:bg-red-800 transition-colors touch-manipulation"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      彻底删除
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -938,9 +905,9 @@ export default function CrawlerPage() {
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
-                {trash.map((note) => (
+                {trash.map((note, index) => (
                   <div
-                    key={note.id}
+                    key={`trash-${note.id}-${index}`}
                     className={cn(
                       "group relative bg-white border rounded-lg overflow-hidden cursor-pointer hover:shadow-lg transition-all",
                       isBatchMode && "cursor-default",

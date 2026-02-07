@@ -184,6 +184,7 @@ xhs-factory/
 - `IMAGE_DOWNLOAD_DELAY_MIN` / `IMAGE_DOWNLOAD_DELAY_MAX` - ZIP 打包时每张图片之间的延迟秒数（默认 0.2～0.5）。
 - `PARSE_RETRY_TIMES` - 单条笔记抓取失败时的重试次数（默认 `1`，即最多共 2 次尝试）；限流不重试。
 - `PARSE_RETRY_DELAY_MIN` / `PARSE_RETRY_DELAY_MAX` - 重试前等待秒数（默认 1～2）。
+- `XHS_CRAWL_DEBUG` - 设为 `1` 或 `true` 时输出极其详细的抓取步骤日志（goto、标题、state 等），便于排查解析失败。
 
 ## 部署说明
 
